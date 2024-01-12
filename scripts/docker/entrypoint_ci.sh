@@ -286,6 +286,17 @@ function check_download_pendulum() {
     pip check
 }
 
+function uninstall_cassandra_for_python_3_12() {
+    if [[ ${PYTHON_MAJOR_MINOR_VERSION} != "3.12" ]]; then
+        return
+    fi
+    echo
+    echo "${COLOR_BLUE}Uninstalling cassandra in case it was installed via cache${COLOR_RESET}"
+    echo
+    pip uninstall --root-user-action ignore -y "cassandra-driver" || true
+    pip check
+}
+
 # Check if we should run tests and run them if needed
 function check_run_tests() {
     if [[ ${RUN_TESTS=} != "true" ]]; then
@@ -318,6 +329,7 @@ check_boto_upgrade
 check_pydantic
 check_download_sqlalchemy
 check_download_pendulum
+uninstall_cassandra_for_python_3_12
 check_run_tests "${@}"
 
 # If we are not running tests - just exec to bash shell
