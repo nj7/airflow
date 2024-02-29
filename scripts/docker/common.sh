@@ -46,7 +46,11 @@ function common::get_packaging_tool() {
         echo
         export PACKAGING_TOOL="uv"
         export PACKAGING_TOOL_CMD="uv pip"
-        export EXTRA_INSTALL_FLAGS="--python ${PYTHON_BIN}"
+        if [[ -z ${VIRTUAL_ENV=} ]]; then
+            export EXTRA_INSTALL_FLAGS="--python ${PYTHON_BIN}"
+        else
+            export EXTRA_INSTALL_FLAGS=""
+        fi
         export EXTRA_UNINSTALL_FLAGS="--python ${PYTHON_BIN}"
         export RESOLUTION_HIGHEST_FLAG="--resolution highest"
         export RESOLUTION_LOWEST_DIRECT_FLAG="--resolution lowest-direct"
@@ -71,14 +75,6 @@ function common::get_airflow_version_specification() {
     fi
 }
 
-function common::override_pip_version_if_needed() {
-    if [[ -n ${AIRFLOW_VERSION} ]]; then
-        if [[ ${AIRFLOW_VERSION} =~ ^2\.0.* || ${AIRFLOW_VERSION} =~ ^1\.* ]]; then
-            export AIRFLOW_PIP_VERSION=24.0
-        fi
-    fi
-}
-
 function common::get_constraints_location() {
     # auto-detect Airflow-constraint reference and location
     if [[ -z "${AIRFLOW_CONSTRAINTS_REFERENCE=}" ]]; then
@@ -95,6 +91,8 @@ function common::get_constraints_location() {
         python_version="$(python --version 2>/dev/stdout | cut -d " " -f 2 | cut -d "." -f 1-2)"
         AIRFLOW_CONSTRAINTS_LOCATION="${constraints_base}/${AIRFLOW_CONSTRAINTS_MODE}-${python_version}.txt"
     fi
+
+    curl -o "${HOME}/constraints.txt" "${AIRFLOW_CONSTRAINTS_LOCATION}"
 }
 
 function common::show_packaging_tool_version_and_location() {
@@ -105,12 +103,12 @@ function common::show_packaging_tool_version_and_location() {
        echo "Using pip: $(pip --version)"
    else
        echo "${COLOR_BLUE}Using 'uv' to install Airflow${COLOR_RESET}"
-       echo "uv on path: $(which uv)"
+       echo "uv on path: $(which uv 2>/dev/null || echo "Not installed")"
        echo "Using uv: $(uv --version)"
    fi
 }
 
-function common::install_packaging_tool() {
+function common::install_packaging_tools() {
     echo
     echo "${COLOR_BLUE}Installing pip version ${AIRFLOW_PIP_VERSION}${COLOR_RESET}"
     echo
@@ -121,17 +119,15 @@ function common::install_packaging_tool() {
         # shellcheck disable=SC2086
         pip install --root-user-action ignore --disable-pip-version-check "pip==${AIRFLOW_PIP_VERSION}"
     fi
-    if [[ ${AIRFLOW_USE_UV} == "true" ]]; then
-        echo
-        echo "${COLOR_BLUE}Installing uv version ${AIRFLOW_UV_VERSION}${COLOR_RESET}"
-        echo
-        if [[ ${AIRFLOW_UV_VERSION} =~ .*https.* ]]; then
-            # shellcheck disable=SC2086
-            pip install --root-user-action ignore --disable-pip-version-check "uv @ ${AIRFLOW_UV_VERSION}"
-        else
-            # shellcheck disable=SC2086
-            pip install --root-user-action ignore --disable-pip-version-check "uv==${AIRFLOW_UV_VERSION}"
-        fi
+    echo
+    echo "${COLOR_BLUE}Installing uv version ${AIRFLOW_UV_VERSION}${COLOR_RESET}"
+    echo
+    if [[ ${AIRFLOW_UV_VERSION} =~ .*https.* ]]; then
+        # shellcheck disable=SC2086
+        pip install --root-user-action ignore --disable-pip-version-check "uv @ ${AIRFLOW_UV_VERSION}"
+    else
+        # shellcheck disable=SC2086
+        pip install --root-user-action ignore --disable-pip-version-check "uv==${AIRFLOW_UV_VERSION}"
     fi
     mkdir -p "${HOME}/.local/bin"
 }

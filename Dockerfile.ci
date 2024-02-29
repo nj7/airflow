@@ -370,18 +370,13 @@ if [[ ${INSTALL_POSTGRES_CLIENT:="true"} == "true" ]]; then
 fi
 EOF
 
-# The content below is automatically copied from scripts/docker/install_pip_version.sh
-COPY <<"EOF" /install_pip_version.sh
+# The content below is automatically copied from scripts/docker/install_packaging_tools.sh
+COPY <<"EOF" /install_packaging_tools.sh
 #!/usr/bin/env bash
 . "$( dirname "${BASH_SOURCE[0]}" )/common.sh"
 
 common::get_colors
-common::get_packaging_tool
-common::get_airflow_version_specification
-common::override_pip_version_if_needed
-common::show_packaging_tool_version_and_location
-
-common::install_packaging_tool
+common::install_packaging_tools
 EOF
 
 # The content below is automatically copied from scripts/docker/install_airflow_dependencies_from_branch_tip.sh
@@ -412,7 +407,7 @@ function install_airflow_dependencies_from_branch_tip() {
     ${PACKAGING_TOOL_CMD} install ${EXTRA_INSTALL_FLAGS} \
       ${ADDITIONAL_PIP_INSTALL_FLAGS} \
       "apache-airflow[${AIRFLOW_EXTRAS}] @ https://github.com/${AIRFLOW_REPO}/archive/${AIRFLOW_BRANCH}.tar.gz"
-    common::install_packaging_tool
+    common::install_packaging_tools
     # Uninstall airflow and providers to keep only the dependencies. In the future when
     # planned https://github.com/pypa/pip/issues/11440 is implemented in pip we might be able to use this
     # flag and skip the remove step.
@@ -427,7 +422,6 @@ function install_airflow_dependencies_from_branch_tip() {
 common::get_colors
 common::get_packaging_tool
 common::get_airflow_version_specification
-common::override_pip_version_if_needed
 common::get_constraints_location
 common::show_packaging_tool_version_and_location
 
@@ -467,7 +461,11 @@ function common::get_packaging_tool() {
         echo
         export PACKAGING_TOOL="uv"
         export PACKAGING_TOOL_CMD="uv pip"
-        export EXTRA_INSTALL_FLAGS="--python ${PYTHON_BIN}"
+        if [[ -z ${VIRTUAL_ENV=} ]]; then
+            export EXTRA_INSTALL_FLAGS="--python ${PYTHON_BIN}"
+        else
+            export EXTRA_INSTALL_FLAGS=""
+        fi
         export EXTRA_UNINSTALL_FLAGS="--python ${PYTHON_BIN}"
         export RESOLUTION_HIGHEST_FLAG="--resolution highest"
         export RESOLUTION_LOWEST_DIRECT_FLAG="--resolution lowest-direct"
@@ -492,14 +490,6 @@ function common::get_airflow_version_specification() {
     fi
 }
 
-function common::override_pip_version_if_needed() {
-    if [[ -n ${AIRFLOW_VERSION} ]]; then
-        if [[ ${AIRFLOW_VERSION} =~ ^2\.0.* || ${AIRFLOW_VERSION} =~ ^1\.* ]]; then
-            export AIRFLOW_PIP_VERSION=24.0
-        fi
-    fi
-}
-
 function common::get_constraints_location() {
     # auto-detect Airflow-constraint reference and location
     if [[ -z "${AIRFLOW_CONSTRAINTS_REFERENCE=}" ]]; then
@@ -516,6 +506,8 @@ function common::get_constraints_location() {
         python_version="$(python --version 2>/dev/stdout | cut -d " " -f 2 | cut -d "." -f 1-2)"
         AIRFLOW_CONSTRAINTS_LOCATION="${constraints_base}/${AIRFLOW_CONSTRAINTS_MODE}-${python_version}.txt"
     fi
+
+    curl -o "${HOME}/constraints.txt" "${AIRFLOW_CONSTRAINTS_LOCATION}"
 }
 
 function common::show_packaging_tool_version_and_location() {
@@ -526,12 +518,12 @@ function common::show_packaging_tool_version_and_location() {
        echo "Using pip: $(pip --version)"
    else
        echo "${COLOR_BLUE}Using 'uv' to install Airflow${COLOR_RESET}"
-       echo "uv on path: $(which uv)"
+       echo "uv on path: $(which uv 2>/dev/null || echo "Not installed")"
        echo "Using uv: $(uv --version)"
    fi
 }
 
-function common::install_packaging_tool() {
+function common::install_packaging_tools() {
     echo
     echo "${COLOR_BLUE}Installing pip version ${AIRFLOW_PIP_VERSION}${COLOR_RESET}"
     echo
@@ -542,17 +534,15 @@ function common::install_packaging_tool() {
         # shellcheck disable=SC2086
         pip install --root-user-action ignore --disable-pip-version-check "pip==${AIRFLOW_PIP_VERSION}"
     fi
-    if [[ ${AIRFLOW_USE_UV} == "true" ]]; then
-        echo
-        echo "${COLOR_BLUE}Installing uv version ${AIRFLOW_UV_VERSION}${COLOR_RESET}"
-        echo
-        if [[ ${AIRFLOW_UV_VERSION} =~ .*https.* ]]; then
-            # shellcheck disable=SC2086
-            pip install --root-user-action ignore --disable-pip-version-check "uv @ ${AIRFLOW_UV_VERSION}"
-        else
-            # shellcheck disable=SC2086
-            pip install --root-user-action ignore --disable-pip-version-check "uv==${AIRFLOW_UV_VERSION}"
-        fi
+    echo
+    echo "${COLOR_BLUE}Installing uv version ${AIRFLOW_UV_VERSION}${COLOR_RESET}"
+    echo
+    if [[ ${AIRFLOW_UV_VERSION} =~ .*https.* ]]; then
+        # shellcheck disable=SC2086
+        pip install --root-user-action ignore --disable-pip-version-check "uv @ ${AIRFLOW_UV_VERSION}"
+    else
+        # shellcheck disable=SC2086
+        pip install --root-user-action ignore --disable-pip-version-check "uv==${AIRFLOW_UV_VERSION}"
     fi
     mkdir -p "${HOME}/.local/bin"
 }
@@ -659,7 +649,7 @@ function install_airflow() {
             "${AIRFLOW_INSTALLATION_METHOD}[${AIRFLOW_EXTRAS}]${AIRFLOW_VERSION_SPECIFICATION}" \
             ${EAGER_UPGRADE_ADDITIONAL_REQUIREMENTS=}
         set +x
-        common::install_packaging_tool
+        common::install_packaging_tools
         echo
         echo "${COLOR_BLUE}Running '${PACKAGING_TOOL} check'${COLOR_RESET}"
         echo
@@ -672,14 +662,14 @@ function install_airflow() {
         ${PACKAGING_TOOL_CMD} install ${EXTRA_INSTALL_FLAGS} ${AIRFLOW_INSTALL_EDITABLE_FLAG} \
             ${ADDITIONAL_PIP_INSTALL_FLAGS} \
             "${AIRFLOW_INSTALLATION_METHOD}[${AIRFLOW_EXTRAS}]${AIRFLOW_VERSION_SPECIFICATION}" \
-            --constraint "${AIRFLOW_CONSTRAINTS_LOCATION}" || true
-        common::install_packaging_tool
+            --constraint ${HOME}/constraints.txt || true
+        common::install_packaging_tools
         # then upgrade if needed without using constraints to account for new limits in pyproject.toml
         ${PACKAGING_TOOL_CMD} install ${EXTRA_INSTALL_FLAGS} --upgrade ${RESOLUTION_LOWEST_DIRECT_FLAG} \
             ${ADDITIONAL_PIP_INSTALL_FLAGS} \
             ${AIRFLOW_INSTALL_EDITABLE_FLAG} \
             "${AIRFLOW_INSTALLATION_METHOD}[${AIRFLOW_EXTRAS}]${AIRFLOW_VERSION_SPECIFICATION}"
-        common::install_packaging_tool
+        common::install_packaging_tools
         set +x
         echo
         echo "${COLOR_BLUE}Running 'pip check'${COLOR_RESET}"
@@ -692,7 +682,6 @@ function install_airflow() {
 common::get_colors
 common::get_packaging_tool
 common::get_airflow_version_specification
-common::override_pip_version_if_needed
 common::get_constraints_location
 common::show_packaging_tool_version_and_location
 
@@ -718,7 +707,7 @@ function install_additional_dependencies() {
         ${PACKAGING_TOOL_CMD} install ${EXTRA_INSTALL_FLAGS} --upgrade ${RESOLUTION_HIGHEST_FLAG} \
             ${ADDITIONAL_PIP_INSTALL_FLAGS} \
             ${ADDITIONAL_PYTHON_DEPS} ${EAGER_UPGRADE_ADDITIONAL_REQUIREMENTS=}
-        common::install_packaging_tool
+        common::install_packaging_tools
         set +x
         echo
         echo "${COLOR_BLUE}Running 'pip check'${COLOR_RESET}"
@@ -732,7 +721,7 @@ function install_additional_dependencies() {
         ${PACKAGING_TOOL_CMD} install ${EXTRA_INSTALL_FLAGS} --upgrade "${RESOLUTION_LOWEST_DIRECT_FLAG}" \
             ${ADDITIONAL_PIP_INSTALL_FLAGS} \
             ${ADDITIONAL_PYTHON_DEPS}
-        common::install_packaging_tool
+        common::install_packaging_tools
         set +x
         echo
         echo "${COLOR_BLUE}Running 'pip check'${COLOR_RESET}"
@@ -744,7 +733,6 @@ function install_additional_dependencies() {
 common::get_colors
 common::get_packaging_tool
 common::get_airflow_version_specification
-common::override_pip_version_if_needed
 common::get_constraints_location
 common::show_packaging_tool_version_and_location
 
@@ -1165,7 +1153,7 @@ ARG DEFAULT_CONSTRAINTS_BRANCH="constraints-main"
 ARG AIRFLOW_CI_BUILD_EPOCH="10"
 ARG AIRFLOW_PRE_CACHED_PIP_PACKAGES="true"
 ARG AIRFLOW_PIP_VERSION=24.0
-ARG AIRFLOW_UV_VERSION=0.1.12
+ARG AIRFLOW_UV_VERSION=0.1.13
 ARG AIRFLOW_USE_UV="true"
 # Setup PIP
 # By default PIP install run without cache to make image smaller
@@ -1188,7 +1176,7 @@ ARG AIRFLOW_VERSION=""
 ARG ADDITIONAL_PIP_INSTALL_FLAGS=""
 
 ARG AIRFLOW_PIP_VERSION=24.0
-ARG AIRFLOW_UV_VERSION=0.1.12
+ARG AIRFLOW_UV_VERSION=0.1.13
 ARG AIRFLOW_USE_UV="true"
 
 ENV AIRFLOW_REPO=${AIRFLOW_REPO}\
@@ -1205,12 +1193,6 @@ ENV AIRFLOW_REPO=${AIRFLOW_REPO}\
     AIRFLOW_PIP_VERSION=${AIRFLOW_PIP_VERSION} \
     AIRFLOW_UV_VERSION=${AIRFLOW_UV_VERSION} \
     AIRFLOW_USE_UV=${AIRFLOW_USE_UV} \
-# In the CI image we always:
-# * install MySQL, MsSQL
-# * install airflow from current sources, not from PyPI package
-# * install airflow without `--user` flag
-# * install airflow in editable mode
-# * install always current version of airflow
     INSTALL_MYSQL_CLIENT="true" \
     INSTALL_MYSQL_CLIENT_TYPE=${INSTALL_MYSQL_CLIENT_TYPE} \
     INSTALL_MSSQL_CLIENT="true" \
@@ -1229,7 +1211,7 @@ RUN echo "Airflow version: ${AIRFLOW_VERSION}"
 
 # Copy all scripts required for installation - changing any of those should lead to
 # rebuilding from here
-COPY --from=scripts install_pip_version.sh install_airflow_dependencies_from_branch_tip.sh \
+COPY --from=scripts install_packaging_tools.sh install_airflow_dependencies_from_branch_tip.sh \
     common.sh /scripts/docker/
 
 # We are first creating a venv where all python packages and .so binaries needed by those are
@@ -1240,7 +1222,7 @@ COPY --from=scripts install_pip_version.sh install_airflow_dependencies_from_bra
 # The Airflow and providers are uninstalled, only dependencies remain.
 # the cache is only used when "upgrade to newer dependencies" is not set to automatically
 # account for removed dependencies (we do not install them in the first place)
-RUN bash /scripts/docker/install_pip_version.sh; \
+RUN bash /scripts/docker/install_packaging_tools.sh; \
     if [[ ${AIRFLOW_PRE_CACHED_PIP_PACKAGES} == "true" ]]; then \
         bash /scripts/docker/install_airflow_dependencies_from_branch_tip.sh; \
     fi
@@ -1290,12 +1272,12 @@ COPY --from=scripts entrypoint_ci.sh /entrypoint
 COPY --from=scripts entrypoint_exec.sh /entrypoint-exec
 RUN chmod a+x /entrypoint /entrypoint-exec
 
-COPY --from=scripts install_pip_version.sh install_additional_dependencies.sh /scripts/docker/
+COPY --from=scripts install_packaging_tools.sh install_additional_dependencies.sh /scripts/docker/
 
 # Additional python deps to install
 ARG ADDITIONAL_PYTHON_DEPS=""
 
-RUN bash /scripts/docker/install_pip_version.sh; \
+RUN bash /scripts/docker/install_packaging_tools.sh; \
     if [[ -n "${ADDITIONAL_PYTHON_DEPS}" ]]; then \
         bash /scripts/docker/install_additional_dependencies.sh; \
     fi

@@ -71,7 +71,11 @@ function in_container_get_packaging_tool() {
         echo
         export PACKAGING_TOOL=""
         export PACKAGING_TOOL_CMD="uv pip"
-        export EXTRA_INSTALL_FLAGS="--python ${PYTHON_BIN}"
+        if [[ -z ${VIRTUAL_ENV=} ]]; then
+            export EXTRA_INSTALL_FLAGS="--python ${PYTHON_BIN}"
+        else
+            export EXTRA_INSTALL_FLAGS=""
+        fi
         export EXTRA_UNINSTALL_FLAGS="--python ${PYTHON_BIN}"
         export RESOLUTION_HIGHEST_FLAG="--resolution highest"
         export RESOLUTION_LOWEST_DIRECT_FLAG="--resolution lowest-direct"
